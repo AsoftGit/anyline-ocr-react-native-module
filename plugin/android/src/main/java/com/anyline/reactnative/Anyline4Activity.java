@@ -19,6 +19,8 @@ import com.anyline.reactnative.R;
 import android.widget.ImageButton;
 import android.widget.LinearLayout;
 import com.google.firebase.ml.vision.barcode.FirebaseVisionBarcode;
+import androidx.constraintlayout.widget.ConstraintLayout;
+import androidx.constraintlayout.widget.ConstraintSet;
 
 import org.json.JSONArray;
 import org.json.JSONException;
@@ -394,7 +396,7 @@ public class Anyline4Activity extends AnylineBaseActivity {
 
                     RelativeLayout relativeLayout = getRelativeLayoutWithScanView();
                     // create the radio button for the UI
-                    addText(relativeLayout, "You're scanning barcode", false,"","");
+                    addContext(relativeLayout, "You're scanning barcode", false,"","", false);
 
 
                     scanViewPlugin.addScanResultListener(new ScanResultListener<BarcodeScanResult>() {
@@ -426,11 +428,12 @@ public class Anyline4Activity extends AnylineBaseActivity {
                     String code="";
                     String name="";
                     String type="";
+                    boolean isManualScanButtonVisible=false;
                     if (json.has("viewPlugin")) {
                         JSONObject meterJson = json.getJSONObject("viewPlugin");
                         if(meterJson.has("meterInformation")){
                             JSONObject labelDataJson = meterJson.getJSONObject("meterInformation");
-                            if(labelDataJson.has("barcode") ){
+                            if(labelDataJson.has("barcode")){
                                 code = labelDataJson.getString("barcode");
                                 if(labelDataJson.has("name") && labelDataJson.has("costumerType")){
                                     name = labelDataJson.getString("name");
@@ -441,6 +444,9 @@ public class Anyline4Activity extends AnylineBaseActivity {
                                     type = "unknown";
                                 }
                             }
+                            if(labelDataJson.has("isManualScanButtonVisible")){
+                                isManualScanButtonVisible = labelDataJson.getBoolean("isManualScanButtonVisible");
+                            }
                         }
 
                     }
@@ -448,7 +454,7 @@ public class Anyline4Activity extends AnylineBaseActivity {
                     final RelativeLayout relativeLayout = getRelativeLayoutWithScanView();
                     // create the radio button for the UI
                     createSegmentRadioButtonUI(json, relativeLayout);
-                    addText(relativeLayout, "You're scanning meter: "+code, true,name,type);
+                    addContext(relativeLayout, "You're scanning meter: "+code, true,name,type, isManualScanButtonVisible);
                     anylineScanView.setCameraOpenListener(this);
                     scanViewPlugin.addScanResultListener(new ScanResultListener<MeterScanResult>() {
                         @Override
@@ -484,54 +490,89 @@ public class Anyline4Activity extends AnylineBaseActivity {
 
     }
 
-    private void addText(RelativeLayout relativeLayout, String message, boolean isCode, String name, String type) {
+    private void addContext(RelativeLayout relativeLayout, String message, boolean isCode, String name, String type, boolean isManualScanButtonVisible) {
         // Defining the RelativeLayout layout parameters.
         // In this case I want to fill its parent
         RelativeLayout.LayoutParams matchParentParams = new RelativeLayout.LayoutParams(
-                RelativeLayout.LayoutParams.MATCH_PARENT, RelativeLayout.LayoutParams.MATCH_PARENT);
+                RelativeLayout.LayoutParams.FILL_PARENT, 
+                RelativeLayout.LayoutParams.FILL_PARENT);
 
         TextView textView = setInfoTV(message, 20);
         ImageButton button = setButton();
 
-        RelativeLayout.LayoutParams textParams = createLayout();
+        RelativeLayout.LayoutParams textParams = new RelativeLayout.LayoutParams(
+            RelativeLayout.LayoutParams.WRAP_CONTENT,
+            RelativeLayout.LayoutParams.MATCH_PARENT);
         textParams.addRule(RelativeLayout.CENTER_IN_PARENT, RelativeLayout.TRUE);
         RelativeLayout.LayoutParams buttonParams = createLayout();
 
         LinearLayout backLayout= new LinearLayout(this);
         backLayout.setOrientation(LinearLayout.HORIZONTAL);
 
-        if(isCode){
-            buttonParams.topMargin = 28;
-            textParams.topMargin=30;
-        }
-        else{
-            buttonParams.topMargin = 52;
-            textParams.topMargin=60;
-        }
-
         Drawable drawable = getResources().getDrawable( R.drawable.bg );
-        RelativeLayout.LayoutParams layoutParams = new RelativeLayout.LayoutParams(RelativeLayout.LayoutParams.MATCH_PARENT,200);
+        RelativeLayout.LayoutParams layoutParams = new RelativeLayout.LayoutParams(
+            RelativeLayout.LayoutParams.MATCH_PARENT,
+            RelativeLayout.LayoutParams.WRAP_CONTENT);
+        
+            layoutParams.height = (int)((2*  textView.getLineHeight())+(textView.getLineHeight()*0.5));
         backLayout.setLayoutParams(layoutParams);
         backLayout.setBackground(drawable);
         backLayout.addView(button,buttonParams);
         backLayout.addView(textView, textParams);
 
         LinearLayout textLayout= new LinearLayout(this);
-        RelativeLayout.LayoutParams infoParams = createLayout();
-        infoParams.topMargin = 220;
-        infoParams.leftMargin = 30;
+        RelativeLayout.LayoutParams infoParams = new RelativeLayout.LayoutParams(
+            RelativeLayout.LayoutParams.FILL_PARENT,
+            RelativeLayout.LayoutParams.FILL_PARENT);
+        infoParams.setMargins(20, layoutParams.height ,0,0);
         textLayout.setLayoutParams(infoParams);
+        textLayout.setOrientation(LinearLayout.VERTICAL);
 
         if(isCode){
-            TextView nameTV =setInfoTV("Meter name: "+name+", ", 14);
+            TextView nameTV =setInfoTV("Meter name: "+name, 14);
             TextView typeTV =setInfoTV("Consumer type: "+type, 14);
+            typeTV.setGravity(Gravity.LEFT);
+            nameTV.setGravity(Gravity.LEFT);
+
             textLayout.addView(nameTV);
             textLayout.addView(typeTV);
+        }
+        if(isManualScanButtonVisible){
+            RelativeLayout.LayoutParams params = new RelativeLayout.LayoutParams(
+                RelativeLayout.LayoutParams.WRAP_CONTENT,      
+                RelativeLayout.LayoutParams.WRAP_CONTENT
+            );
+            params.bottomMargin = 50;
+            params.addRule(RelativeLayout.ALIGN_PARENT_BOTTOM);
+            params.addRule(RelativeLayout.CENTER_IN_PARENT);
+            Button manualReadingBtn = setManualReadingButton();
+            manualReadingBtn.setLayoutParams(params);
+            relativeLayout.addView(manualReadingBtn);
         }
 
         relativeLayout.addView(backLayout);
         relativeLayout.addView(textLayout);
+       
         setContentView(relativeLayout, matchParentParams);
+    }
+
+    private Button setManualReadingButton() {
+        Button btn = new Button(this);
+        btn.setText("Manual Reading");
+        btn.setTextColor(0xffffffff);
+        btn.setBackgroundColor(Color.parseColor("#76d100"));
+        btn.setOnClickListener(new View.OnClickListener(){
+            public void onClick(View v){
+                JSONObject jsonResult = new JSONObject();
+                try {
+                    jsonResult.put("message", "manualReading");
+                } 
+                catch (JSONException e) {
+                }
+                setResult(scanViewPlugin, jsonResult);
+            }
+        });
+        return btn;
     }
 
     private ImageButton setButton(){
