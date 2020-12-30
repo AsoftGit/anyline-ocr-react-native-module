@@ -58,9 +58,16 @@
     NSError *error = nil;
     
     
+    [AnylineSDK setupWithLicenseKey:self.licensekey error:&error];
+    if (error) {
+        [self.delegate pluginScanViewController:self
+                                didStopScanning:self
+                                          error:error];
+        return;
+    }
+    
     self.scanView = [ALScanView scanViewForFrame:self.view.bounds
                                       configDict:self.anylineConfig
-                                      licenseKey:self.licensekey
                                         delegate:self
                                            error:&error];
     

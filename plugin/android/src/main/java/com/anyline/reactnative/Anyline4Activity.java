@@ -11,6 +11,9 @@ import android.widget.RadioGroup;
 import android.widget.TextView;
 import android.widget.Button;
 import android.widget.RelativeLayout;
+import android.os.Handler;
+
+
 import android.view.Gravity;
 import android.graphics.Color;
 import android.util.TypedValue;
@@ -28,16 +31,20 @@ import org.json.JSONObject;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.HashMap;
 import java.util.List;
 
 import at.nineyards.anyline.AnylineDebugListener;
 import at.nineyards.anyline.camera.CameraController;
+import at.nineyards.anyline.core.LicenseException;
 import at.nineyards.anyline.core.RunFailure;
 import at.nineyards.anyline.core.Vector_Contour;
 import at.nineyards.anyline.core.exception_error_codes;
 //import at.nineyards.anyline.modules.mrz.Identification;
+import io.anyline.AnylineSDK;
 import io.anyline.plugin.ScanResult;
 import io.anyline.plugin.ScanResultListener;
+import io.anyline.plugin.barcode.Barcode;
 import io.anyline.plugin.barcode.BarcodeScanResult;
 import io.anyline.plugin.barcode.BarcodeScanViewPlugin;
 import io.anyline.plugin.id.DrivingLicenseConfig;
@@ -47,8 +54,11 @@ import io.anyline.plugin.id.GermanIdFrontIdentification;
 import io.anyline.plugin.id.ID;
 import io.anyline.plugin.id.IdScanPlugin;
 import io.anyline.plugin.id.IdScanViewPlugin;
+import io.anyline.plugin.id.Identification;
 import io.anyline.plugin.id.MrzConfig;
 import io.anyline.plugin.id.MrzIdentification;
+import io.anyline.plugin.id.TemplateConfig;
+import io.anyline.plugin.id.UniversalIdConfig;
 import io.anyline.plugin.licenseplate.LicensePlateScanResult;
 import io.anyline.plugin.licenseplate.LicensePlateScanViewPlugin;
 import io.anyline.plugin.meter.MeterScanMode;
@@ -74,10 +84,13 @@ public class Anyline4Activity extends AnylineBaseActivity {
     private RadioGroup radioGroup;
     private AnylineUIConfig anylineUIConfig;
     private String cropAndTransformError;
+    private Boolean isFirstCameraOpen; // only if camera is opened the first time get coordinates of the cutout to avoid flickering when switching between analog and digital
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
+        isFirstCameraOpen=true;
 
         // init the scan view
         anylineScanView = new ScanView(this, null);
@@ -146,11 +159,17 @@ public class Anyline4Activity extends AnylineBaseActivity {
             // this is used for the OCR Plugin, when languages has to be added
             json = AnylinePluginHelper.setLanguages(json, getApplicationContext());
 
+            try {
+                AnylineSDK.init(licenseKey, this);
+            } catch (LicenseException e) {
+                finishWithError(getString(getResources().getIdentifier("error_license_init", "string", getPackageName())));
+            }
+
             if (json.has("serialViewPluginComposite") || json.has("parallelViewPluginComposite")) {
-                anylineScanView.initComposite(json, licenseKey); // for composite
+                anylineScanView.initComposite(json); // for composite
                 scanViewPlugin = anylineScanView.getScanViewPlugin();
             } else {
-                anylineScanView.setScanConfig(json, licenseKey); // for non-composite
+                anylineScanView.setScanConfig(json); // for non-composite
             }
             if (anylineScanView != null) {
                 scanViewPlugin = anylineScanView.getScanViewPlugin();
@@ -237,13 +256,21 @@ public class Anyline4Activity extends AnylineBaseActivity {
                                         e.printStackTrace();
                                     }
                                 } else if (subResult instanceof BarcodeScanResult) {
-                                    JSONObject jsonBcResult = new JSONObject();
                                     try {
-                                        jsonBcResult.put("value", subResult.getResult());
-                                        jsonBcResult.put("format", ((BarcodeScanResult) subResult).getBarcodeFormat());
-                                        jsonBcResult = AnylinePluginHelper.jsonHelper(Anyline4Activity.this, subResult,
-                                                jsonBcResult);
-                                        jsonResult.put(subResult.getPluginId(), jsonBcResult);
+                                        List<Barcode> barcodeList = (List<Barcode>) subResult.getResult();
+
+                                        JSONArray barcodeArray = new JSONArray();
+                                        if(barcodeList.size() > 1) {
+                                            for (int i = 0; i < barcodeList.size(); i++) {
+                                                barcodeArray.put(barcodeList.get(i).toJSONObject());
+                                            }
+                                            JSONObject finalObject = new JSONObject();
+                                            finalObject.put("multiBarcodes", barcodeArray);
+                                            jsonResult = AnylinePluginHelper.jsonHelper(Anyline4Activity.this, subResult, finalObject);
+                                        }else{
+                                            jsonResult = AnylinePluginHelper.jsonHelper(Anyline4Activity.this, subResult, barcodeList.get(0).toJSONObject());
+
+                                        }
                                     } catch (JSONException e) {
                                         e.printStackTrace();
                                     }
@@ -366,8 +393,26 @@ public class Anyline4Activity extends AnylineBaseActivity {
                                 setResult(scanViewPlugin, jsonResult);
                             }
                         });
-                    }
+                    } else if (((IdScanPlugin) ((IdScanViewPlugin) scanViewPlugin).getScanPlugin()).getIdConfig() instanceof UniversalIdConfig) {
+                        scanViewPlugin.addScanResultListener(new ScanResultListener<ScanResult<ID>>() {
+                            @Override
+                            public void onResult(ScanResult<ID> idScanResult) {
+                                Identification identification = (Identification) idScanResult.getResult();
+                                HashMap<String, String> data = (HashMap<String, String>) identification.getResultData();
 
+                                JSONObject jsonResult = new JSONObject (data);
+
+                                try {
+                                    jsonResult = AnylinePluginHelper.jsonHelper(Anyline4Activity.this, idScanResult,
+                                                                                jsonResult);
+                                } catch (Exception e) {
+                                    Log.e(TAG, "Exception is: ", e);
+
+                                }
+                                setResult(scanViewPlugin, jsonResult);
+                            }
+                        });
+                    }
                 } else if (scanViewPlugin instanceof OcrScanViewPlugin) {
                     if (json.has("reportingEnabled")) {
                         //scanViewPlugin.setReportingEnabled(json.optBoolean("reportingEnabled", true));
@@ -404,11 +449,25 @@ public class Anyline4Activity extends AnylineBaseActivity {
                         public void onResult(BarcodeScanResult barcodeScanResult) {
                             JSONObject jsonResult = new JSONObject();
                             try {
+                                List<Barcode> barcodeList = barcodeScanResult.getResult();
 
-                                jsonResult.put("value", barcodeScanResult.getResult());
-                                jsonResult.put("format", barcodeScanResult.getBarcodeFormat());
-                                jsonResult = AnylinePluginHelper.jsonHelper(Anyline4Activity.this, barcodeScanResult,
-                                        jsonResult);
+                                JSONArray barcodeArray = new JSONArray();
+                                if(barcodeList!= null && barcodeList.size() > 0) {
+                                    for (int i = 0; i < barcodeList.size(); i++) {
+                                        JSONObject barcode = new JSONObject();
+                                        barcode.put("value", barcodeList.get(i).getValue());
+                                        barcode.put("barcodeFormat", barcodeList.get(i).getBarcodeFormat());
+
+                                        barcodeArray.put(barcode);
+                                    }
+                                    JSONObject finalObject = new JSONObject();
+                                    finalObject.put("barcodes", barcodeArray);
+                                    jsonResult = AnylinePluginHelper.jsonHelper(Anyline4Activity.this, barcodeScanResult, finalObject);
+                                }
+                                //else{
+                                //    jsonResult = AnylinePluginHelper.jsonHelper(Anyline4Activity.this, barcodeScanResult, barcodeList.get(0).toJSONObject());
+
+                                // }
                             } catch (JSONException e) {
                                 e.printStackTrace();
                             }
@@ -416,6 +475,7 @@ public class Anyline4Activity extends AnylineBaseActivity {
                             setResult(scanViewPlugin, jsonResult);
 
                         }
+
 
                     });
 
@@ -615,8 +675,12 @@ public class Anyline4Activity extends AnylineBaseActivity {
             @Override
             public void run() {
                 if (radioGroup != null) {
-                    //orig: Rect rect = anylineScanView.getScanViewPlugin().getCutoutImageOnSurface(); // =cutoutRect.rectOnVisibleView
-                    Rect rect = ((MeterScanViewPlugin) scanViewPlugin).getCutoutRectOnVisibleView();
+                    Handler handler = new Handler();
+                    handler.postDelayed(new Runnable() {
+                        public void run() {
+                            if (isFirstCameraOpen) {
+                                isFirstCameraOpen=false;
+                                Rect rect = ((MeterScanViewPlugin) scanViewPlugin).getCutoutRect().rectOnVisibleView;
 
                     RelativeLayout.LayoutParams lp = (RelativeLayout.LayoutParams) radioGroup.getLayoutParams();
 //                    lp.setMargins(50 + anylineUIConfig.getOffsetX(), anylineUIConfig.getOffsetY(), 0,
@@ -625,7 +689,11 @@ public class Anyline4Activity extends AnylineBaseActivity {
                             0);
                     radioGroup.setLayoutParams(lp);
 
-                    radioGroup.setVisibility(View.VISIBLE);
+                                radioGroup.setVisibility(View.VISIBLE);
+                            }
+                        }
+                    }, 600);
+
                 }
             }
         });
@@ -689,6 +757,7 @@ public class Anyline4Activity extends AnylineBaseActivity {
                     View button = group.findViewById(checkedId);
                     String mode = modes.get(group.indexOfChild(button));
                     ((MeterScanViewPlugin) scanViewPlugin).setScanMode(MeterScanMode.valueOf(mode));
+                    //anylineScanView.releaseCameraInBackground();
                     anylineScanView.stop();
                     try {
                         Thread.sleep(100);

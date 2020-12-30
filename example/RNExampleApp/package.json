@@ -1,6 +1,6 @@
 {
   "name": "RNExampleApp",
-  "version": "20.0.0",
+  "version": "27.1.0",
   "private": true,
   "scripts": {
     "start": "node node_modules/react-native/local-cli/cli.js start",
@@ -15,7 +15,7 @@
     "hermesvm": "^0.1.1",
     "jsc-android": "^241213.1.0",
     "react": "^16.10.2",
-    "react-native": "^0.61.2"
+    "react-native": "^0.63.3"
   },
   "devDependencies": {
     "@babel/core": "^7.6.2",
