@@ -19,6 +19,7 @@ import BarcodeConfig from '../config/BarcodeConfig';
 import BarcodePDF417Config from '../config/Barcode_PDF417Config';
 import DocumentConfig from '../config/DocumentConfig';
 import MRZConfig from '../config/MRZConfig';
+import UniversalIdConfig from '../config/UniversalIdConfig';
 import NFCAndMRZConfig from '../config/NFCAndMRZConfig';
 import AutoEnergyConfig from '../config/AutoEnergyConfig';
 import AnalogEnergyConfig from '../config/AnalogMeterConfig';
@@ -131,6 +132,9 @@ class Anyline extends Component {
       case 'MRZ':
         config = MRZConfig;
         break; 
+      case 'UNIVERSAL_ID':
+        config = UniversalIdConfig;
+        break; 
       case 'NFC+MRZ':
         config = NFCAndMRZConfig;
         break;
@@ -197,8 +201,8 @@ class Anyline extends Component {
         fullImagePath,
       });
     } catch (error) {
-      if (error !== 'Canceled') {
-        console.log(error);
+      if (error.message !== 'Canceled') {
+        console.log(error.message);
         alert(error)
       }
     }
@@ -253,6 +257,7 @@ class Anyline extends Component {
       result: {},
       imagePath: '',
       fullImagePath: '',
+	  titles: [],
     });
   };
 
@@ -277,7 +282,6 @@ class Anyline extends Component {
         BackHandler.exitApp();
       }
     });
-    console.log(titles);
     return (
       <ScrollView
         style={styles.container}
@@ -296,7 +300,7 @@ class Anyline extends Component {
                   data={result}
                   emptyResult={this.emptyResult}
                   hasBackButton={Object.keys(result).length - 1 === index}
-                  title={titles[index]}
+                  title={key}
                 />
               );
             })

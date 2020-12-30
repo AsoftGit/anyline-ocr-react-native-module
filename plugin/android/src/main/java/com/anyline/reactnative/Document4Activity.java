@@ -3,9 +3,12 @@ package com.anyline.reactnative;
 import android.animation.ObjectAnimator;
 import android.animation.ValueAnimator;
 import android.app.ProgressDialog;
+import android.content.DialogInterface;
 import android.graphics.Bitmap;
+import android.graphics.Color;
 import android.graphics.PointF;
 import android.os.Bundle;
+import android.os.Handler;
 import android.util.Log;
 import android.util.TypedValue;
 import android.view.View;
@@ -14,6 +17,7 @@ import android.view.WindowManager;
 import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
+import android.widget.ImageButton;
 import android.widget.ImageView;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -29,8 +33,10 @@ import java.util.UUID;
 import androidx.core.content.ContextCompat;
 import at.nineyards.anyline.camera.CameraController;
 import at.nineyards.anyline.camera.CameraOpenListener;
+import at.nineyards.anyline.core.LicenseException;
 import at.nineyards.anyline.models.AnylineImage;
 import at.nineyards.anyline.util.TempFileUtil;
+import io.anyline.AnylineSDK;
 import io.anyline.plugin.ScanResult;
 import io.anyline.plugin.document.DocumentScanResultListener;
 import io.anyline.plugin.document.DocumentScanViewPlugin;
@@ -54,13 +60,15 @@ public class Document4Activity extends AnylineBaseActivity implements CameraOpen
     private long lastErrorRecieved = 0;
     private int quality = 100;
     private Runnable errorMessageCleanup;
+    private ImageButton btnCapture;
+    JSONObject jsonResult;
 
     private android.os.Handler handler = new android.os.Handler();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        setContentView(getResources().getIdentifier("activity_scan_scanview", "layout", getPackageName()));
+        setContentView(getResources().getIdentifier("activity_scan_document", "layout", getPackageName()));
 
 
         // takes care of fading the error message out after some time with no error reported from the SDK
@@ -102,13 +110,58 @@ public class Document4Activity extends AnylineBaseActivity implements CameraOpen
         // the view can be configured via a json file in the assets, and this config is set here
 
         try {
-            final JSONObject json = new JSONObject(configJson);
-            documentScanView.setScanConfig(json, licenseKey);
-        } catch (Exception e) {
-            e.printStackTrace();
+            AnylineSDK.init(licenseKey, this);
+        } catch (LicenseException e) {
+            finishWithError(getString(getResources().getIdentifier("error_license_init", "string", getPackageName())));
         }
 
+        JSONObject json = null;
+        try {
+            json = new JSONObject(configJson);
+            documentScanView.setScanConfig(json);
+        } catch (Exception e) {
+            e.printStackTrace();
+            Log.i(TAG, "**************** Exception: " + e);
+        }
 
+        btnCapture = findViewById(getResources().getIdentifier("capture", "id", getPackageName()));
+
+        // get Document specific Configs
+        if (json.has("document")) {
+            try {
+                // Get the Document specific Config
+                JSONObject documentConfig = json.getJSONObject("document");
+
+                // set manual capture Button Config
+                if (documentConfig.has("manualCaptureButton")) {
+                    JSONObject manCapBtnConf = documentConfig.getJSONObject("manualCaptureButton");
+
+                    if (manCapBtnConf.has("buttonColor")) {
+                        //btnCapture.setBackgroundColor(Color.parseColor("#" + manCapBtnConf.getString("buttonColor")));
+                        btnCapture.setColorFilter(Color.parseColor("#" + manCapBtnConf.getString("buttonColor")));
+
+                    }
+
+                    // init Manual Capture Button
+                    btnCapture.setVisibility(View.VISIBLE);
+                    btnCapture.setOnClickListener(new View.OnClickListener() {
+
+                        @Override
+                        public void onClick(View v) {
+                            btnCapture.setClickable(false);
+                            documentScanView.stop();
+                            ((DocumentScanViewPlugin) documentScanView.getScanViewPlugin()).triggerPictureCornerDetection();
+                        }
+                    });
+
+                } else {
+                    btnCapture.setVisibility(View.GONE);
+                }
+
+            } catch (JSONException e) {
+                Log.e(TAG, e.getMessage());
+            }
+        }
 
         // initialize Anyline with the license key and a Listener that is called if a result is found
         documentScanView.getScanViewPlugin().addScanResultListener(new DocumentScanResultListener() {
@@ -119,6 +172,7 @@ public class Document4Activity extends AnylineBaseActivity implements CameraOpen
                 if (progressDialog != null && progressDialog.isShowing()) {
                     progressDialog.dismiss();
                 }
+                btnCapture.setClickable(false);
 
                 AnylineImage transformedImage = (AnylineImage) documentResult.getResult();
                 AnylineImage fullFrame = documentResult.getFullImage();
@@ -158,7 +212,8 @@ public class Document4Activity extends AnylineBaseActivity implements CameraOpen
                 File outDir = new File(getCacheDir(), "ok");
                 outDir.mkdir();
                 // change the file ending to png if you want a png
-                JSONObject jsonResult = new JSONObject();
+                //JSONObject
+                jsonResult = new JSONObject();
                 try {
                     // convert the transformed image into a gray scaled image internally
                     // transformedImage.getGrayCvMat(false);
@@ -166,9 +221,10 @@ public class Document4Activity extends AnylineBaseActivity implements CameraOpen
                     // Bitmap bmp = transformedImage.getBitmap();
                     // save the image with quality 100 (only used for jpeg, ignored for png)
                     File imageFile = TempFileUtil.createTempFileCheckCache(Document4Activity.this,
-                            UUID.randomUUID().toString(), ".jpg");
+                                                                           UUID.randomUUID().toString(), ".jpg");
                     transformedImage.save(imageFile, quality);
-                    showToast(getString(getResources().getIdentifier("document_image_saved_to", "string", getPackageName())) + " " + imageFile.getAbsolutePath());
+//                    showToast(getString(
+//                            getResources().getIdentifier("document_image_saved_to", "string", getPackageName())) + " " + imageFile.getAbsolutePath());
 
                     jsonResult.put("imagePath", imageFile.getAbsolutePath());
 
@@ -176,7 +232,7 @@ public class Document4Activity extends AnylineBaseActivity implements CameraOpen
                     // Save the Full Frame Image
                     if (fullFrame != null) {
                         imageFile = TempFileUtil.createTempFileCheckCache(Document4Activity.this,
-                                UUID.randomUUID().toString(), ".jpg");
+                                                                          UUID.randomUUID().toString(), ".jpg");
                         fullFrame.save(imageFile, quality);
                         jsonResult.put("fullImagePath", imageFile.getAbsolutePath());
                     }
@@ -209,10 +265,9 @@ public class Document4Activity extends AnylineBaseActivity implements CameraOpen
                     setResult(AnylineSDKPlugin.RESULT_OK);
                     finish();
                 } else {
+                    btnCapture.setClickable(true);
                     ResultReporter.onResult(jsonResult, false);
                 }
-
-
             }
 
 
@@ -241,7 +296,7 @@ public class Document4Activity extends AnylineBaseActivity implements CameraOpen
 
                 // if there is a problem, here is how images could be saved in the error case
                 // this will be a full, not cropped, not transformed image
-                AnylineImage image = ((DocumentScanViewPlugin)documentScanView.getScanViewPlugin()).getCurrentFullImage();
+                AnylineImage image = ((DocumentScanViewPlugin) documentScanView.getScanViewPlugin()).getCurrentFullImage();
 
                 if (image != null) {
                     File outDir = new File(getCacheDir(), "error");
@@ -268,9 +323,40 @@ public class Document4Activity extends AnylineBaseActivity implements CameraOpen
             @Override
             public void onTakePictureSuccess() {
                 // this is called after the image has been captured from the camera and is about to be processed
-                progressDialog = ProgressDialog.show(Document4Activity.this, getString(getResources().getIdentifier("document_processing_picture_header", "string", getPackageName())),
-                        getString(getResources().getIdentifier("document_processing_picture", "string", getPackageName())),
-                        true);
+                if (progressDialog != null && progressDialog.isShowing()) {
+                    progressDialog.dismiss();
+                }
+
+                // do not display error messages while "processing picture" progress dialog is shown:
+                errorMessageLayout.setVisibility(View.GONE);
+
+                progressDialog = ProgressDialog.show(Document4Activity.this, getString(
+                        getResources().getIdentifier("document_processing_picture_header", "string", getPackageName())),
+                                                     getString(
+                                                             getResources().getIdentifier("document_processing_picture", "string", getPackageName())),
+                                                     true);
+
+                // there is a bug in the sdk that onTakePictureSuccess is called but onResult not.
+                // so implement a workaround: hide the progressDialog after 2 seconds, the phone will continue scanning
+                final Handler handler1 = new Handler();
+                final Runnable runnable = new Runnable() {
+                    @Override
+                    public void run() {
+                        if (progressDialog.isShowing()) {
+                            progressDialog.dismiss();
+                        }
+                    }
+                };
+
+                progressDialog.setOnDismissListener(new DialogInterface.OnDismissListener() {
+                    @Override
+                    public void onDismiss(DialogInterface dialog) {
+                        handler1.removeCallbacks(runnable);
+                    }
+                });
+
+                handler1.postDelayed(runnable, 2000);
+                // workaround end
 
                 if (errorMessageAnimator != null && errorMessageAnimator.isRunning()) {
 
@@ -293,16 +379,76 @@ public class Document4Activity extends AnylineBaseActivity implements CameraOpen
             }
 
             @Override
-            public void onPictureCornersDetected(AnylineImage anylineImage, List rect) {
+            public void onPictureCornersDetected(AnylineImage anylineImage, List list) {
                 // this is called after manual corner detection was requested
-                // Note: not implemented in this example
+
+                // save fullFrame
+                //JSONObject
+                jsonResult = new JSONObject();
+
+                try {
+                    File imageFile = TempFileUtil.createTempFileCheckCache(Document4Activity.this, UUID.randomUUID().toString(), ".jpg");
+                    anylineImage.save(imageFile, quality);
+                    //manualResult.put("fullImagePath", imageFile.getAbsolutePath());
+                    jsonResult.put("fullImagePath", imageFile.getAbsolutePath());
+                    jsonResult.put("outline", jsonForOutline(list));
+                } catch (IOException e) {
+                    e.printStackTrace();
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+
+                ((DocumentScanViewPlugin) documentScanView.getScanViewPlugin()).transformPicture(anylineImage, list);
+                anylineImage.release();
             }
+
 
             @Override
             public void onPictureTransformed(AnylineImage anylineImage) {
                 // this is called after a full frame image and 4 corners were passed to the SDK for
                 // transformation (e.g. when a user manually selected the corners in an image)
-                // Note: not implemented in this example
+
+                // handle the result document images here
+                if (progressDialog != null && progressDialog.isShowing()) {
+                    progressDialog.dismiss();
+                }
+
+                // save fullFrame
+                try {
+                    File imageFile = TempFileUtil.createTempFileCheckCache(Document4Activity.this, UUID.randomUUID().toString(), ".jpg");
+                    anylineImage.save(imageFile, quality);
+                    jsonResult.put("imagePath", imageFile.getAbsolutePath());
+
+                    //                    if (showSuccessToast) {
+                    //                        // Only show toast if user has specified it should be shown
+                    //                        showToast(getString(getResources().getIdentifier("document_image_saved_to", "string", getPackageName())) + " " + imageFile.getAbsolutePath());
+                    //                    }
+
+                } catch (IOException e) {
+                    e.printStackTrace();
+                } catch (JSONException e) {
+                    e.printStackTrace();
+                }
+
+                anylineImage.release();
+
+                Boolean cancelOnResult = true;
+                JSONObject jsonObject;
+                try {
+                    jsonObject = new JSONObject(configJson);
+                    cancelOnResult = jsonObject.getBoolean("cancelOnResult");
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+
+                if (cancelOnResult) {
+                    ResultReporter.onResult(jsonResult, true);
+                    setResult(AnylineSDKPlugin.RESULT_OK);
+                    finish();
+                } else {
+                    btnCapture.setClickable(true);
+                    ResultReporter.onResult(jsonResult, false);
+                }
             }
 
             @Override
@@ -312,7 +458,6 @@ public class Document4Activity extends AnylineBaseActivity implements CameraOpen
             }
 
         });
-
 
         // optionally stop the scan once a valid result was returned
         // documentScanView.setCancelOnResult(cancelOnResult);
